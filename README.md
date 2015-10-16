@@ -6,9 +6,17 @@ HRobots are robots, written in Haskell programming language, that can fight on a
 
 ## Stack
 
-Install in Debian
+Under Debian install:
 
     sudo aptitude install libzmq3 libzmq3-dev pkg-config
+
+Under Fedora install:
+
+    sudo yum -i pkgconfig zeromq 
+
+Under other distributions:
+* install pkg-config tool
+* install ZeroMQ (ZMQ, 0MQ) libraries, at version 4 of the protocol, both the library and the development headers. 
 
 Build the package under Stack
 
