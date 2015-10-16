@@ -1,0 +1,64 @@
+name:                hrobots
+
+-- The package version.  See the Haskell package versioning policy (PVP) 
+-- for standards guiding when and how versions should be incremented.
+-- http://www.haskell.org/haskellwiki/Package_versioning_policy
+-- PVP summary:      +-+------- breaking API changes
+--                   | | +----- non-breaking API additions
+--                   | | | +--- code changes with no API change
+version:             0.1.0.0
+
+synopsis: NetRobots implemented in Haskell. 
+
+description:  Haskell robots that can fight in a virtual arena, provided by the server https://github.com/massimo-zaniboni/netrobots                    
+
+-- The license under which the package is released.
+license:             GPL
+
+-- The file containing the license text.
+license-file:        LICENSE
+
+-- The package author(s).
+author:              Massimo Zaniboni
+
+-- An email address to which users can send suggestions, bug reports, and 
+-- patches.
+maintainer:          massimo.zaniboni@gmail.com
+
+-- A copyright notice.
+-- copyright:           
+
+category: game 
+
+build-type:          Simple
+
+-- Extra files to be distributed with the package, such as examples or a 
+-- README.
+extra-source-files:  README.md
+
+-- Constraint on the version of Cabal needed to build this package.
+cabal-version:       >=1.10
+
+
+executable hrobots
+  main-is:              Main.hs
+  
+  -- Modules included in this executable, other than Main.
+  -- other-modules:       
+  
+  other-extensions:    BangPatterns, DeriveDataTypeable, FlexibleInstances, MultiParamTypeClasses
+  
+  build-depends:       base >=4.8 && <4.9,
+                       zeromq4-haskell -any,
+                       bytestring -any,
+                       protocol-buffers -any,
+                       protocol-buffers-descriptor -any,
+                       AC-Angle -any,                                 
+                       reactive-banana -any
+ 
+  hs-source-dirs: src      
+  default-language:    Haskell2010
+
+
+
+  
