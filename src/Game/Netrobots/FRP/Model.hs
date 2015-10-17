@@ -66,8 +66,7 @@ type HRobotCommand
 -- | The wire of robots:
 --   * use Float as time
 --   * use () as error 
---   * use Status.RobotStatus as input value
---   * run inside HRobotCommand state monad, that stores the selected commands
+--   * run inside HRobotCommand state monad, that stores the selected commands, and the robot status
 type HRobotWire a b = Wire Float () HRobotCommand a b
 
 type IsWinner = Bool
@@ -76,10 +75,11 @@ type IsWinner = Bool
 runHRobot
   :: ConnectionConfiguration
   -> CreateRobot.CreateRobot
+  -> a
   -> HRobotWire a b
   -> IO IsWinner
 
-runHRobot connConf robotParams wire0 = runZMQ $ do
+runHRobot connConf robotParams input0 wire0 = runZMQ $ do
 
   -- Init Robot
 
@@ -97,11 +97,11 @@ runHRobot connConf robotParams wire0 = runZMQ $ do
     False
       -> return False
     True
-      -> runHRobot' s tok 0 state0 wire0
+      -> runHRobot' s tok 0 state0 (Right input0) wire0
 
  where
 
-  runHRobot' sock tok time1 robotState1 wire1 = 
+  runHRobot' sock tok time1 robotState1 input1 wire1 = 
     case Status.isDead robotState1 of
       True
         -> return False
@@ -114,15 +114,15 @@ runHRobot connConf robotParams wire0 = runZMQ $ do
                       deltaTime =  time2 - time1
                       ((maybeErr, wire2), cmd)
                         = MS.runState
-                            (stepWire wire1 deltaTime (Right robotState1))
+                            (stepWire wire1 deltaTime input1)
                             (robotState1, Nothing, Nothing, Nothing)
 
-                      (driveCmd, scanCmd, fireCmd)
+                      (_, driveCmd, scanCmd, fireCmd)
                         = case maybeErr of
-                             Left _ -> (Nothing, Nothing, Nothing)
+                             Left _ -> (robotState1, Nothing, Nothing, Nothing)
                                        -- in case of error do not execute any command
                              Right _ -> cmd
-                             
+
                       robotCommand
                         = RobotCommand.RobotCommand {
                               RobotCommand.token = tok
@@ -132,7 +132,7 @@ runHRobot connConf robotParams wire0 = runZMQ $ do
                             }
                           
                   in do robotState2 <- sendCmd sock tok robotCommand 
-                        runHRobot' sock tok time2 robotState2 wire2 
+                        runHRobot' sock tok time2 robotState2 input1 wire2 
 
   -- TODO remove putStrLn commands later 
   sendMainCmd s cmd
@@ -163,22 +163,22 @@ runHRobot connConf robotParams wire0 = runZMQ $ do
 --
 
 -- | Change the state of the host Monad.
-executeDrive :: Maybe Drive.Drive -> HRobotWire a ()
-executeDrive v = mkGen_ $ \_ -> do
+executeDrive :: HRobotWire (Maybe Drive.Drive) ()
+executeDrive = mkGen_ $ \v -> do
   (s, _, sc, cn) <- MS.get
   MS.put (s, v, sc, cn)
   return $ Right ()
   
 -- | Change the state of the host Monad.
-executeScan :: Maybe Scan.Scan -> HRobotWire a ()
-executeScan v = mkGen_ $ \_ -> do
+executeScan :: HRobotWire (Maybe Scan.Scan) ()
+executeScan = mkGen_ $ \v -> do
   (s, dr, _, cn) <- MS.get
   MS.put (s, dr, v, cn)
   return $ Right ()
 
 -- | Change the state of the host Monad.
-executeFire :: Maybe Cannon.Cannon -> HRobotWire a ()
-executeFire v = mkGen_ $ \_ -> do
+executeFire :: HRobotWire (Maybe Cannon.Cannon) ()
+executeFire = mkGen_ $ \v -> do
   (s, dr, sc, _) <- MS.get
   MS.put (s, dr, sc, v)
   return $ Right ()
