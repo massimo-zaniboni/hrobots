@@ -37,10 +37,67 @@ point_distance (x0, y0) (x1, y1)
        d a b = (fromIntegral a - fromIntegral b) ** 2 
    in  sqrt $ d x1 x0 + d y1 y0
 
-waitStatus :: Socket z Req -> Utf8 -> ZMQ z RobotStatus 
-waitStatus s tok
-    = let cmd = defaultValue { RobotCommand.token = tok }
-      in sendMainCmd s (defaultValue { robotCommand = Just cmd})
+-- | Direction 0 - 360. 90 is NORTH, 0 is EAST, 270 is SOUTH, 189 is WEST. 
+type Direction = Int
+
+-- | Distance from 0 to 1000
+type Distance = Int
+
+{-  XXX 
+-- | Create a Robot with default params.
+initRobot :: ConnectionConfiguration -> IO (, RobotToken)
+initRobot connConf = runZMQ $ do
+  s <- socket Req
+  connect s (gameServerAddress connConf)
+  let cmd = MainCommand {
+             createRobot = Just $ defaultRobotParams $ robotName connConf
+           , robotCommand = Nothing
+           , deleteRobot = Nothing
+           }
+  st <- sendMainCmd s cmd
+  let tok = Status.token st
+  return (s, tok)
+ XXX -}
+                
+createCmd_fire :: Direction -> Distance -> Cannon
+createCmd_fire dir dst
+  = Cannon { Cannon.direction = fromIntegral $ dir, Cannon.distance = fromIntegral $ dst }
+
+type Speed = Int
+
+createCmd_drive :: Direction -> Speed -> Drive
+createCmd_drive dir sp
+  = Drive { Drive.direction = fromIntegral dir, Drive.speed = fromIntegral sp }
+
+-- | From 0 to 180
+type SemiAperture = Int
+
+createCmd_scan :: Direction -> SemiAperture -> Scan
+createCmd_scan dir ap
+  = Scan { Scan.direction = fromIntegral dir, Scan.semiaperture = fromIntegral ap }
+
+-- | Robot token identifying it in the system.
+type RobotToken = Utf8
+
+-- | Send a command to the server and wait for the answer with the new robot status.
+--   A robot can move, scan and fire (if it is not reloading) at each move.
+sendCmd :: Socket z Req -> RobotToken -> Maybe Drive -> Maybe Scan -> Maybe Cannon -> ZMQ z RobotStatus
+sendCmd s tok md ms mc
+  = do let mainCmd = MainCommand {
+                         createRobot = Nothing
+                         , robotCommand
+                             = Just $ RobotCommand {
+                                 RobotCommand.token = tok
+                               , RobotCommand.drive = md
+                               , RobotCommand.cannon = mc
+                               , RobotCommand.scan = ms
+                               }
+                         , deleteRobot = Nothing
+                         }
+       sendMainCmd s mainCmd
+       
+waitStatus :: Socket z Req -> RobotToken -> ZMQ z RobotStatus 
+waitStatus s tok = sendCmd s tok Nothing Nothing Nothing
 
 sendMainCmd :: Socket z Req -> MainCommand -> ZMQ z RobotStatus
 sendMainCmd s cmd
@@ -52,15 +109,7 @@ sendMainCmd s cmd
          liftIO $ putStrLn $ "Robot status: " ++ show status ++ "\n"
          return status
 
-sendCmd :: Socket z Req -> Utf8 -> RobotCommand -> ZMQ z RobotStatus
-sendCmd s tok cmd
-    = do let mainCmd = MainCommand {
-                         createRobot = Nothing
-                         , robotCommand = Just $ cmd { RobotCommand.token = tok } 
-                         , deleteRobot = Nothing
-                         }
-         sendMainCmd s mainCmd
- 
+
 robotClassic :: ConnectionConfiguration -> IO ()
 robotClassic connConf = runZMQ $ do
   s <- socket Req
@@ -84,10 +133,10 @@ robotClassic connConf = runZMQ $ do
          let (x0, y0) = (fromIntegral $ x s1, fromIntegral $ y s1)
          let (Angle.Degrees dg) = Angle.degrees $ Angle.Radians $ atan2 (fromIntegral $ y1 - y0) (fromIntegral $ x1 - x0)
          let heading = fromInteger $ toInteger $ round dg 
-         let driveCmd = Drive { Drive.speed = 100, Drive.direction = heading }
-         s2 <- sendCmd s tok (defaultValue { RobotCommand.drive = Just driveCmd })
+         let driveCmd = createCmd_drive heading 100
+         s2 <- sendCmd s tok (Just driveCmd) Nothing Nothing
          waitNearPosition s tok (x1, y1)
-         _ <- sendCmd s tok (defaultValue { RobotCommand.drive = Just $ Drive { Drive.speed = 0, Drive.direction = heading }})
+         _ <- sendCmd s tok (Just $ createCmd_drive heading 0) Nothing Nothing
          waitStopMovement s tok
          return ()
 
