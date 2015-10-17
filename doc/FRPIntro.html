@@ -1,0 +1,243 @@
+<h1 id="functional-reactive-programming-intro">Functional Reactive Programming Intro</h1>
+<p>WARNING: these are only quick notes for a talk, done using the Tufte method, and in the mean-time I'm discovering netwire and FRP for the first time.</p>
+<p>Functional Reactive Programming (FRP):</p>
+<ul>
+<li>reactive perche` si modella un robot che reagisce a degli eventi/segnali, connettendo una serie di nodi che processano i segnali in modo continuo: una sorta di circuito</li>
+<li>functional perche` i programmi reattivi sono implementati (dietro le quinte), usando un linguaggio funzionale</li>
+<li>programming perche` il codice e` eseguibile in modo efficiente, anche se al momento non con requisiti hard-real-time, ma solo soft-real-time</li>
+</ul>
+<p>Quando si programma in FRP la semantica e` completamente diversa (o quasi) da quella di un tipico linguaggio funzionale. Un FRP e` un Domain Specific Language (DSL) comodo per specificare nel nostro caso Robot che devono reagire ad eventi esterni.</p>
+<p>Questa e` una tipica pattern di Haskell: se qualcosa diventa scomodo da specificare usando funzioni pure, allora si puo` definire una libreria che usa Applicative e/o Arrows e/o Monad e di fatto definire un Domain Specific Language con relativo interprete e specificare il problema nel nuovo linguaggio.</p>
+<h2 id="non-reactive-robot-code">Non Reactive Robot Code</h2>
+<p>In questo momento abbiamo due problemi, invece di uno:</p>
+<ul>
+<li>capire il linguaggio FRP</li>
+<li>specificare robot usando FRP</li>
+</ul>
+<p>Per aprezzare perche` ci serve FRP partiamo da un esempio di un robot che non ne fa uso.</p>
+<p>Iniziamo con del codice che si puo` tranquillamente ignorare (e` un literate document quindi lo devo comunque inserire se no non compila)</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">module</span> <span class="dt">Game.Netrobots.Examples.FRPIntro</span> <span class="kw">where</span></code></pre></div>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">import </span><span class="dt">System.ZMQ4.Monadic</span>
+<span class="kw">import </span><span class="dt">Control.Monad</span> (forever)
+<span class="kw">import </span><span class="dt">Data.ByteString.Char8</span> (pack, unpack)
+<span class="kw">import </span><span class="dt">Control.Concurrent</span> (threadDelay)
+<span class="kw">import </span><span class="dt">Text.ProtocolBuffers.Basic</span>
+<span class="kw">import </span><span class="dt">Text.ProtocolBuffers.WireMessage</span>
+<span class="kw">import </span><span class="dt">Text.ProtocolBuffers.Reflections</span>
+<span class="kw">import qualified</span> <span class="dt">Data.ByteString.Lazy</span> <span class="kw">as</span> <span class="dt">LBS</span>
+<span class="kw">import qualified</span> <span class="dt">Data.Angle</span> <span class="kw">as</span> <span class="dt">Angle</span>
+
+<span class="kw">import </span><span class="dt">Game.Netrobots.Proto.CreateRobot</span> <span class="kw">as</span> <span class="dt">CreateRobot</span>
+<span class="kw">import </span><span class="dt">Game.Netrobots.Proto.RobotCommand</span> <span class="kw">as</span> <span class="dt">RobotCommand</span>
+<span class="kw">import </span><span class="dt">Game.Netrobots.Proto.DeleteRobot</span>
+<span class="kw">import </span><span class="dt">Game.Netrobots.Proto.Drive</span> <span class="kw">as</span> <span class="dt">Drive</span>
+<span class="kw">import </span><span class="dt">Game.Netrobots.Proto.Scan</span> <span class="kw">as</span> <span class="dt">Scan</span>
+<span class="kw">import </span><span class="dt">Game.Netrobots.Proto.Cannon</span> <span class="kw">as</span> <span class="dt">Cannon</span>
+<span class="kw">import </span><span class="dt">Game.Netrobots.Proto.MainCommand</span>
+<span class="kw">import </span><span class="dt">Game.Netrobots.Proto.RobotStatus</span> <span class="kw">as</span> <span class="dt">Status</span>
+<span class="kw">import </span><span class="dt">Game.Netrobots.Proto.ScanStatus</span> <span class="kw">as</span> <span class="dt">ScanStatus</span>
+
+<span class="kw">import </span><span class="dt">FRP.Netwire</span>
+<span class="kw">import </span><span class="dt">Prelude</span> <span class="kw">hiding</span> ((.), id)</code></pre></div>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">data</span> <span class="dt">ConnectionConfiguration</span>
+       <span class="fu">=</span> <span class="dt">ConnectionConfiguration</span> {
+<span class="ot">           gameServerAddress ::</span> <span class="dt">String</span>
+         ,<span class="ot"> robotName ::</span> <span class="dt">String</span>
+         } <span class="kw">deriving</span> (<span class="dt">Eq</span>, <span class="dt">Show</span>, <span class="dt">Ord</span>)
+
+<span class="kw">type</span> <span class="dt">Point</span> <span class="fu">=</span> (<span class="dt">Int</span>, <span class="dt">Int</span>)
+
+<span class="ot">fromProtoBuffer ::</span> (<span class="dt">ReflectDescriptor</span> msg, <span class="dt">Wire</span> msg) <span class="ot">=&gt;</span> <span class="dt">ByteString</span> <span class="ot">-&gt;</span> msg
+fromProtoBuffer bs
+  <span class="fu">=</span> <span class="kw">case</span> messageGet bs <span class="kw">of</span>
+      <span class="dt">Left</span> err <span class="ot">-&gt;</span> error <span class="fu">$</span> <span class="st">&quot;Error reading proto buffer message: &quot;</span> <span class="fu">++</span> err
+      <span class="dt">Right</span> (r, _) <span class="ot">-&gt;</span> r
+
+<span class="ot">defaultRobotParams ::</span> <span class="dt">String</span> <span class="ot">-&gt;</span> <span class="dt">CreateRobot</span>
+defaultRobotParams robotName
+  <span class="fu">=</span> <span class="dt">CreateRobot</span> {
+      CreateRobot.name <span class="fu">=</span> uFromString robotName
+      , maxHitPoints <span class="fu">=</span> <span class="fu">-</span><span class="dv">1</span>
+      , CreateRobot.maxSpeed <span class="fu">=</span> <span class="fu">-</span><span class="dv">1</span>
+      , acceleration <span class="fu">=</span> <span class="fu">-</span><span class="dv">1</span>
+      , decelleration <span class="fu">=</span> <span class="fu">-</span><span class="dv">1</span>
+      , maxSterlingSpeed <span class="fu">=</span> <span class="fu">-</span><span class="dv">1</span>
+      , maxScanDistance <span class="fu">=</span> <span class="fu">-</span><span class="dv">1</span>
+      , maxFireDistance <span class="fu">=</span> <span class="fu">-</span><span class="dv">1</span>
+      , bulletSpeed <span class="fu">=</span> <span class="fu">-</span><span class="dv">1</span>
+      , bulletDamage <span class="fu">=</span> <span class="fu">-</span><span class="dv">1</span>
+      , reloadingTime <span class="fu">=</span> <span class="fu">-</span><span class="dv">1</span>
+      }
+
+
+<span class="ot">robotClassic ::</span> <span class="dt">ConnectionConfiguration</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> ()
+robotClassic connConf <span class="fu">=</span> runZMQ <span class="fu">$</span> <span class="kw">do</span>
+  s <span class="ot">&lt;-</span> socket <span class="dt">Req</span>
+  connect s (gameServerAddress connConf)
+  <span class="kw">let</span> cmd <span class="fu">=</span> <span class="dt">MainCommand</span> {
+             createRobot <span class="fu">=</span> <span class="dt">Just</span> <span class="fu">$</span> defaultRobotParams <span class="fu">$</span> robotName connConf
+           , robotCommand <span class="fu">=</span> <span class="dt">Nothing</span>
+           , deleteRobot <span class="fu">=</span> <span class="dt">Nothing</span>
+           }
+         
+  st <span class="ot">&lt;-</span> sendMainCmd s cmd
+  <span class="kw">let</span> tok <span class="fu">=</span> Status.token st
+
+  gotoPosition s tok (<span class="dv">100</span>,<span class="dv">200</span>) 
+
+  return ()
+ <span class="kw">where</span></code></pre></div>
+<p><code>sendMainCmd</code> (la funzione sotto) invia un comando serializzato tramite Protobuffer al server dell'arena di gioco, usando ZMQ come protocollo di rete/comunicazione e attende la risposta dal server, con lo stato (se e` stato colpito, la sua posizione sulla board, il risultato dello scan del radar, ecc...)</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell">  sendMainCmd s cmd
+    <span class="fu">=</span> <span class="kw">do</span> liftIO <span class="fu">$</span> putStrLn <span class="fu">$</span> <span class="st">&quot;Send command: &quot;</span> <span class="fu">++</span> show cmd
+         <span class="kw">let</span> protoCmd <span class="fu">=</span> LBS.toStrict <span class="fu">$</span> messagePut cmd
+         send s [] protoCmd
+         bs <span class="ot">&lt;-</span> receive s
+         <span class="kw">let</span><span class="ot"> status ::</span> <span class="dt">RobotStatus</span> <span class="fu">=</span> fromProtoBuffer <span class="fu">$</span> LBS.fromStrict bs
+         liftIO <span class="fu">$</span> putStrLn <span class="fu">$</span> <span class="st">&quot;Robot status: &quot;</span> <span class="fu">++</span> show status <span class="fu">++</span> <span class="st">&quot;\n&quot;</span>
+         return status</code></pre></div>
+<p><code>waitStatus</code> non fa niente, ma in compenso riceve dal server lo stato del robot.</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell">  waitStatus s tok
+    <span class="fu">=</span> <span class="kw">let</span> cmd <span class="fu">=</span> defaultValue { RobotCommand.token <span class="fu">=</span> tok }
+      <span class="kw">in</span> sendMainCmd s (defaultValue { robotCommand <span class="fu">=</span> <span class="dt">Just</span> cmd})</code></pre></div>
+<p>Seguono altre funzioni che non vale la pena studiare.</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell">  sendCmd s tok cmd
+    <span class="fu">=</span> <span class="kw">do</span> <span class="kw">let</span> mainCmd <span class="fu">=</span> <span class="dt">MainCommand</span> {
+                         createRobot <span class="fu">=</span> <span class="dt">Nothing</span>
+                         , robotCommand <span class="fu">=</span> <span class="dt">Just</span> <span class="fu">$</span> cmd { RobotCommand.token <span class="fu">=</span> tok } 
+                         , deleteRobot <span class="fu">=</span> <span class="dt">Nothing</span>
+                         }
+         sendMainCmd s mainCmd
+   
+<span class="ot">  distance ::</span> <span class="dt">Point</span> <span class="ot">-&gt;</span> <span class="dt">Point</span> <span class="ot">-&gt;</span> <span class="dt">Double</span>
+  distance (x0, y0) (x1, y1)
+   <span class="fu">=</span> <span class="kw">let</span><span class="ot"> d ::</span> <span class="dt">Int</span> <span class="ot">-&gt;</span> <span class="dt">Int</span> <span class="ot">-&gt;</span> <span class="dt">Double</span>
+         d a b <span class="fu">=</span> (fromIntegral a <span class="fu">-</span> fromIntegral b) <span class="fu">**</span> <span class="dv">2</span> 
+     <span class="kw">in</span>  sqrt <span class="fu">$</span> d x1 x0 <span class="fu">+</span> d y1 y0</code></pre></div>
+<p>Ok qua si fa interessante. <code>gotoPosition</code> e` un Task che il robot deve eseguire: andare alla posizione <code>(x1, y1)</code></p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell">  gotoPosition s tok (x1, y1)
+    <span class="fu">=</span> <span class="kw">do</span> s1 <span class="ot">&lt;-</span> waitStatus s tok
+         <span class="kw">let</span> (x0, y0) <span class="fu">=</span> (fromIntegral <span class="fu">$</span> x s1, fromIntegral <span class="fu">$</span> y s1)</code></pre></div>
+<p>Il codice sopra ha guardato in che posizione si trova ora, chiedendo il <code>status</code> al server.</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell">         <span class="kw">let</span> (<span class="dt">Angle.Degrees</span> dg) <span class="fu">=</span> Angle.degrees <span class="fu">$</span> <span class="dt">Angle.Radians</span> <span class="fu">$</span> atan2 (fromIntegral <span class="fu">$</span> y1 <span class="fu">-</span> y0) (fromIntegral <span class="fu">$</span> x1 <span class="fu">-</span> x0)
+         <span class="kw">let</span> heading <span class="fu">=</span> fromInteger <span class="fu">$</span> toInteger <span class="fu">$</span> round dg 
+         <span class="kw">let</span> driveCmd <span class="fu">=</span> <span class="dt">Drive</span> { Drive.speed <span class="fu">=</span> <span class="dv">100</span>, Drive.direction <span class="fu">=</span> heading }
+         s2 <span class="ot">&lt;-</span> sendCmd s tok (defaultValue { RobotCommand.drive <span class="fu">=</span> <span class="dt">Just</span> driveCmd })</code></pre></div>
+<p>Il codice sopra ha calcolato la direzione che deve prendere per andare dalla sua posizione attuale <code>(x0, y0)</code> alla posizione voluta <code>(x1, y1)</code> usando delle semplici regole trigonometriche che sono sicuro tutti ricorderanno! :-) E poi invia il comando di guida al server indicando direzione e velocita`.</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell">         waitNearPosition s tok (x1, y1)</code></pre></div>
+<p>Ovviamente ad un certo punto il Robot deve iniziare a frenare. Quindi chiama il Task <code>wainNearPosition</code> che torna quando il robot e` vicino alla posizione voluta.</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell">         _ <span class="ot">&lt;-</span> sendCmd s tok (defaultValue { RobotCommand.drive <span class="fu">=</span> <span class="dt">Just</span> <span class="fu">$</span> <span class="dt">Drive</span> { Drive.speed <span class="fu">=</span> <span class="dv">0</span>, Drive.direction <span class="fu">=</span> heading }})</code></pre></div>
+<p>E` giunto il momento di frenare, e lo fa impostando la velocita` a zero.</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell">         waitStopMovement s tok</code></pre></div>
+<p>Attende che la decellerazione porti la velocita` a 0, chiamando il task relativo.</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell">         return ()</code></pre></div>
+<p>Ok il task principale e` terminato, dato che e` arrivato alla posizione voluta ed e` fermo.</p>
+<p>La funzione sotto e` un sotto task usato in precedenza: attente che il robot sia vicino alla posizione voluta. Vicino ma non esattamente alla posizione.</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell">  waitNearPosition s tok (x1, y1)
+    <span class="fu">=</span> <span class="kw">do</span> s1 <span class="ot">&lt;-</span> waitStatus s tok
+         <span class="kw">let</span> (x0, y0) <span class="fu">=</span> (fromIntegral <span class="fu">$</span> x s1, fromIntegral <span class="fu">$</span> y s1)
+         <span class="kw">let</span> d1 <span class="fu">=</span> distance (x0, y0) (x1, y1)
+         <span class="kw">case</span> d1 <span class="fu">&gt;</span> <span class="fl">80.0</span> <span class="kw">of</span>
+           <span class="dt">True</span> <span class="ot">-&gt;</span> waitNearPosition s tok (x1, y1)
+           <span class="dt">False</span> <span class="ot">-&gt;</span> return ()</code></pre></div>
+<p>Se e` piu` lontano di 80 punti, continua ad attendere chiamando il task in maniera ricorsiva. Siccome Haskell ha la tail recursion, in realta` questo e` un loop, e non usa spazio sullo stack.</p>
+<p>Quando e` piu` vicino di 80, torna dato che il task e` terminato.</p>
+<p>Questo sotto task attende che il Robot sia completamente fermo e poi ritorna.</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell">  waitStopMovement s tok 
+   <span class="fu">=</span> <span class="kw">do</span> s1 <span class="ot">&lt;-</span> waitStatus s tok 
+        <span class="kw">case</span> (Status.speed s1) <span class="fu">&gt;</span> <span class="dv">0</span> <span class="kw">of</span>
+          <span class="dt">True</span> <span class="ot">-&gt;</span> waitStopMovement s tok
+          <span class="dt">False</span> <span class="ot">-&gt;</span> return ()</code></pre></div>
+<h3 id="pregi">Pregi</h3>
+<p>Le Monad di Haskell permettono di comporre Task in modo elegante e un Task main puo` richiamare sotto Task.</p>
+<h3 id="difetti">Difetti</h3>
+<p>Mentre il nostro Robot va alla posizione <code>(x, y)</code> non reagisce ad eventi esterni, ma completa solo il suo Task in maniera stupida. Se viene colpito da altri Robot non reagisce. Se trova altri Robot con il radar non spara.</p>
+<p>Bisognerebbe estendere <code>gotoPosition</code> perche` controlli se ci sono altri eventi importanti. Ma ogni sub task che non usa <code>gotoPosition</code> deve essere esteso allo stesso modo dato che se richiede piu` cicli di esecuzione, il robot non puo` permettersi di essere passivo e non reagire alle emergenze.</p>
+<p>Quindi i programmi scritti in questo formalismo non sono facilmente estendibili e componibili, se si vuole rispettare il requisito che siano anche capaci di reagire agli eventi esterni.</p>
+<h3 id="possibile-soluzione">Possibile Soluzione</h3>
+<p>FRP e` una possibile soluzione dato che e` un formalismo dove ci sono eventi (stimoli sensoriali basici), eventi complessi risultato della combinazione di altri eventi (presa di coscienza di una certa situazione) ed e` possibile reagire di conseguenza, decidendo che piano di azioni seguire di volta in volta.</p>
+<p>La robottica e` un dominio complesso e quindi non voglio dire che FRP sia la soluzione definitiva al problema.</p>
+<h2 id="frp-intro">FRP Intro</h2>
+<p>Prima di applicare FRP all'esempio del Robot, e` utile fare degli esempi di codice FRP per impararne le basi. Anche perche` al momento non le conosco neanche io di preciso.</p>
+<p>Ci sono tantissime librerie FRP in Haskell. Ho scelto <code>netwire</code> dato che:</p>
+<ul>
+<li>i tipi che ha mi piacciono e mi sembrano chiari (ma forse <code>varying</code> e` ancora piu` elegante)</li>
+<li>e` molto veloce e affidabile essendo arrivata alla versione 5 (<code>varying</code> non e` ancora alla 1.0)</li>
+</ul>
+<h3 id="types">Types</h3>
+<p>Inutile dire che in Haskell i tipi sono importantissimi. <code>netwire</code> usa questo tipo <code>Wire s e m a b</code> che rappresenta:</p>
+<ul>
+<li>un value di tipo <code>b</code> che varia nel tempo. Quindi <code>b</code> in <code>Wire s e m a b</code> rappresenta il tipo del value tornato/associato. Per esempio se il <code>Wire</code> e` usato per indicare la temperatura attuale , <code>b = Double</code></li>
+<li>il <code>Wire</code> torna un valore di tipo <code>b</code> che e` in funzione (dipende) da un value in input (magari da un altro <code>Wire</code>) di tipo <code>a</code>. Quindi si puo` pensare ad Wire come ad una funzione <code>a -&gt; b</code> che torna continuamente valori di tipo <code>b</code> al variare del segnale in input <code>a</code></li>
+<li>il <code>Wire</code> puo` essere eseguito all'interno di una Monad host di tipo <code>m</code>, ma <code>m</code> puo` anche essere un Applicative, Arrow o altro. Per esempio la <code>StateMonad</code> o la <code>IO</code></li>
+<li><code>s</code> e` il Type usato per rappresentare le differenze di tempo fra una computazione e l'altra</li>
+<li><code>e</code> e` il tipo di errore/fail tornato da un Wire</li>
+</ul>
+<p>Haskell e` un linguaggio elegante e questa e` una prova: <code>instance (Monad m, Fractional b) =&gt; Fractional (Wire s e m a b) where ...</code>. Questa definizione dice che se usiamo un <code>Wire</code> in una Monad host e il valore tornato <code>b</code> e` di tipo Fractional, allora possiamo trattare il <code>Wire</code> come un membro della classe <code>Fractional</code>, ovvero tutte le operazioni aritmetiche definite per numeri <code>Fractional</code> sono definite anche per il <code>Wire</code>. Quindi possiamo sommare due segnali e tornare <code>b + b</code> e cose di questo tipo.</p>
+<p>Ma ce ne sono molte altre di simili. Per esempio <code>instance (Monad m, Monoid e) =&gt; Choice (Wire s e m) where ...</code> afferma che possiamo applicare tutte le operazioni di <code>Choice</code> su un <code>Wire</code> di un certo tipo.</p>
+<h3 id="wire-values">Wire values</h3>
+<p>La logica di molte di queste librerie FRP e` quella di definire un set finito di valori base che sono un Wire e di definire delle operazioni di combinazione di Wire, e garantire che il tutto sia veloce, dato che il tutto e` costruito da un set noto di possibili valori base e loro successive combinazioni.</p>
+<p>Un esempio di <code>Wire</code> base (<code>Wire</code> constructor) <code>la funzione</code>pure 17` torna per esempio un Wire che ha come valore costante 17.</p>
+<h3 id="compound-wires">Compound Wires</h3>
+<p>Ecco una definizione di Wire piu` complessa</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="ot">myWire ::</span> (<span class="dt">Monad</span> m, <span class="dt">Num</span> b) <span class="ot">=&gt;</span> <span class="dt">Wire</span> s e m a b
+myWire <span class="fu">=</span> liftA2 (<span class="fu">+</span>) (pure <span class="dv">15</span>) (pure <span class="dv">17</span>)</code></pre></div>
+<p>Un <code>Wire</code> e` una instance di <code>Applicative</code>, quindi si puo` applicare la funzione <code>liftA2 :: Applicative f =&gt; (a -&gt; b -&gt; c) -&gt; f a -&gt; f b -&gt; f c</code> che:</p>
+<ul>
+<li>prende un primo Wire basico <code>pure 15</code> che torna sempre 15</li>
+<li>prende un secondo Wire basico <code>pure 17</code> che torna sempre 17</li>
+<li>applica la funzione <code>+</code> definita su <code>Num</code></li>
+<li>inserisce il risultato in un Wire finale</li>
+</ul>
+<p>Quindi abbiamo costruito un nuovo Wire che torna sempre 32.</p>
+<p><code>netwire</code> non definisce un nuovo vocabolario di funzioni e combinatori e quando puo` si rifa` alle funzioni definite per <code>Applicative</code>, <code>Arrow</code> &amp; C. e definisce solo le <code>instance</code> che spiegano al compilatore come e` possibile vedere un <code>Wire</code> come una instance di <code>Applicative</code> &amp; C.</p>
+<p>Da notare che siccome i Wire sono instance di <code>Num</code> e` anche possibile scrivere in forma piu` compatta</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="ot">myWire2 ::</span> (<span class="dt">Monad</span> m, <span class="dt">Num</span> b) <span class="ot">=&gt;</span> <span class="dt">Wire</span> s e m a b
+myWire2 <span class="fu">=</span> <span class="dv">15</span> <span class="fu">+</span> <span class="dv">17</span></code></pre></div>
+<p>Un <code>Wire</code> di sistema e` <code>time :: (HasTime t s) =&gt; Wire s e m a t</code> che torna il time corrente durante l'esecuzione dei vari Signal.</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell">myWire3 <span class="fu">=</span> liftA2 (\t c <span class="ot">-&gt;</span> c <span class="fu">+</span> <span class="dv">2</span> <span class="fu">*</span> t) time (pure <span class="dv">60</span>)</code></pre></div>
+<p>e` un Wire che somma il time attuale di simulazione (il Wire <code>time</code>) per 2, con il Wire che torna il valore costante 60. Sempre perche` Haskell e` potente e` possibile anche scrivere in forma piu` compatta:</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell">myWire4 <span class="fu">=</span> time <span class="fu">*</span> <span class="dv">2</span> <span class="fu">+</span> <span class="dv">60</span></code></pre></div>
+<p>e partendo dal type di <code>time</code> che e` un Wire il compilatore riesce a dedurre <code>myWire3</code></p>
+<p>Un esempio di Wire e`</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell">myWire5 <span class="fu">=</span> for <span class="dv">3</span> <span class="fu">.</span> <span class="st">&quot;yes&quot;</span> <span class="fu">&lt;|&gt;</span> <span class="st">&quot;no&quot;</span></code></pre></div>
+<p>che e` un Wire che torna &quot;yes&quot; per 3 secondi, poi quando il primo Wire fallisce, la funzione <code>&lt;|&gt;</code> torna il secondo Wire, quindi &quot;no&quot;. Da notare che la funzione puo` essere riscritta in forma estesa</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell">myWire6 <span class="fu">=</span> (for <span class="dv">3</span> <span class="fu">.</span> pure <span class="st">&quot;yes&quot;</span>) <span class="fu">&lt;|&gt;</span> pure <span class="st">&quot;no&quot;</span></code></pre></div>
+<p>rendendo piu` chiaro che si stanno combinando dei Wire.</p>
+<h3 id="events">Events</h3>
+<p>Un Wire e` associato ad un signal (beaviour) che varia nel tempo, e che ha un valore ad ogni momento specifico della simulazione.</p>
+<p>Un <code>Event</code> e` un valore che si ha in un solo momento della simulazione. Si pensi ai tasti premuti e altre cose di questo tipo.</p>
+<h3 id="switching">Switching</h3>
+<p>Eventi del sistema, generati dall'esterno o da condition calcolate internamente, possono essere usate come <code>Switch</code> per decidere che un <code>Wire</code> inizia a comportarsi in maniera completamente diversa. Siccome un <code>Wire</code> puo` anche essere un'intero grafo di Wire combinati insieme, lo Switch e` un modo per decidere che tipo di network FRP eseguire a run-time.</p>
+<p>Quindi se nel sistema accadono Eventi, il network cambia struttura in base alle istruzioni di Switch.</p>
+<p>Per esempio <code>modes :: (Monad m, Ord k) =&gt; k -&gt; (k -&gt; Wire s e m a b) -&gt; Wire s e m (a, Event k) b</code> e` usata per dire:</p>
+<ul>
+<li>si parte con lo stato/mode &quot;k&quot; iniziale (il primo parametro</li>
+<li>il Wire ha un comportamente definito dalla funzione passata come secondo parametro</li>
+<li>il Wire tornato dalla funzione, e` arricchito per rispondere anche ad un evento <code>Event k</code></li>
+<li>quando il Wire riceve un <code>Event k</code>, la funzione e` chiamata di nuovo per decidere quale nuova forma deve prendere il <code>Wire</code></li>
+</ul>
+<p>Quindi si ha una sostituzione &quot;imperativa&quot; di Wire a run-time in base agli eventi ricevuti.</p>
+<h3 id="wire-execution">Wire execution</h3>
+<p>Le funzioni basiche e i combinatori e i switch sono usate per creare la definizione di un Network di nodi/Wire. Poi in <code>netwire</code> e` possibile passare questo network di Wires, ad una funzione che lo esegue in modo efficiente.</p>
+<p>La forma base e` molto elegante <code>stepWire :: Monad m =&gt; Wire s e m a b -&gt; s -&gt; Either e a -&gt; m (Either e b, Wire s e m a b) Source</code> e dice:</p>
+<ul>
+<li><code>stepWire</code> accetta un <code>Wire</code>, ma siccome i <code>Wire</code> possono essere arbitrariamente complessi possono anche essere un intero Nework di nodi FRP, come un semplice <code>pure 15</code></li>
+<li>si passa il delta-time di tipo <code>s</code>, cioe` il ticket di time che si vuole simulare</li>
+<li>si passa o un errore di tipo <code>e</code> oppure un valore in input del wire di tipo <code>a</code> (ricordiamo che un Wire trasforma un input value <code>a</code> in un risultato <code>b</code>)</li>
+<li>viene tornato un valore nella monad host <code>m</code>, che puo` essere o un errore <code>e</code> o un valore di tipo <code>b</code>, e lo stato del <code>Wire</code> al termine dello step di simulazione con delta-time <code>s</code>. Quindi un Wire eseguito nella <code>IO</code> puo` modificare o leggere lo stato esterno, o se eseguito in una <code>StateMonad</code> puo` modificare lo stato oltre a tornare un risultato.</li>
+<li>se si richiama <code>stepWire</code> con il <code>Wire</code> tornato come risultato si continua nella simulazione allo step successivo</li>
+<li>si puo` usare il risultato <code>b</code> per passarlo al resto del codice Haskell che non fa uso dei Wire</li>
+</ul>
+<p>Tutte le altre funzioni che eseguono un Network fino a completition e simili, si basano su <code>stepWire</code>.</p>
+<h3 id="considerazioni">Considerazioni</h3>
+<p>Spero si aprezzi l'eleganza matematica del tutto e le infinite potenzialita` di combinare Wire e usarli in diverse Monad. In confronto il polimorfismo nei sistemi object-oriented sono un caso di gemelli siamesi :-) Il riuso di codice che si ha nella programmazione funzionale e` dato dalla possibilita` di usare building-block molto &quot;funzionali&quot; e adattabili. Ogni cosa che riusciamo a descrivere come un <code>Wire</code> puo` poi usare tutta la libreria <code>netwire</code>. Quindi o Robot o GUI o Spreadsheet, a patto che possano essere caricati in RAM e che quindi il motore <code>netwire</code> sia adatto per eseguirli.</p>
+<h3 id="altro">Altro</h3>
+<p>Un tutorial su <code>netwire</code> si trova su http://hackage.haskell.org/package/netwire</p>
+<p>Dopo di che c'e` l'API di <code>netwire</code> e per finire ogni volta che si definisce una instance di Wire e` possibile usare tutte le funzioni definite per l'instance per i Wire.</p>
+<p>Quindi diventare fluenti in Netwire non e` banale, ma allo stesso tempo si imparano concetti usabili anche in altri DSL.</p>
+<h3 id="disclosure">Disclosure</h3>
+<p>In realta` e` tardi e non ho tempo di verificare se il codice compila...</p>
+<h2 id="next-passages">Next Passages</h2>
+<p>Ora devo definire delle Wire che accettano i valori tornati dai sensori di un robot, che tornano come risultato finale un comando da inviare ad un robot, e creo un framework che invia comandi e immette nelle Wire lo stato del Robot.</p>
+<p>Fatto questo e` possibile usare <code>netwire</code> per specificare dei Robot.</p>
