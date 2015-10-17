@@ -1,5 +1,5 @@
-{ mkDerivation, AC-Angle, base, bytestring, netwire
-, protocol-buffers, protocol-buffers-descriptor, stdenv
+{ mkDerivation, AC-Angle, base, bytestring, mtl, netwire
+, protocol-buffers, protocol-buffers-descriptor, stdenv, text
 , zeromq4-haskell
 }:
 mkDerivation {
@@ -9,8 +9,8 @@ mkDerivation {
   isLibrary = false;
   isExecutable = true;
   executableHaskellDepends = [
-    AC-Angle base bytestring netwire protocol-buffers
-    protocol-buffers-descriptor zeromq4-haskell
+    AC-Angle base bytestring mtl netwire protocol-buffers
+    protocol-buffers-descriptor text zeromq4-haskell
   ];
   description = "NetRobots implemented in Haskell";
   license = "GPL";

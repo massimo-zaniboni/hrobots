@@ -3,8 +3,7 @@
 -- | A Robot with imperative-like code, for testing the ZMQ and Protobuffer part,
 --   before encapsulating the control logic in more advanced libraries.
 module Game.Netrobots.Examples.TestRobotClassic(
-  ConnectionConfiguration(..)
-  , robotClassic
+  robotClassic
   ) where
 
 import System.ZMQ4.Monadic
@@ -17,6 +16,7 @@ import Text.ProtocolBuffers.Reflections
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Angle as Angle
 
+import Game.Netrobots.Connection
 import Game.Netrobots.Proto.CreateRobot as CreateRobot
 import Game.Netrobots.Proto.RobotCommand as RobotCommand
 import Game.Netrobots.Proto.DeleteRobot
@@ -26,14 +26,6 @@ import Game.Netrobots.Proto.Cannon as Cannon
 import Game.Netrobots.Proto.MainCommand
 import Game.Netrobots.Proto.RobotStatus as Status
 import Game.Netrobots.Proto.ScanStatus as ScanStatus
-
--- NOTE the context can not be captured and exported outside the runZMQ monad, so all other data exchange must be made using normal function parameters. So a runZMQ act like a single/unique/distinct thread, and only it can use the socket. Multiple thread can use some configuration of sockets for sending multiple messages, and queue them.
--- TODO verificare che se non mando comandi il server tiene buona l'ultima speed e direction ma non fa SCAN e non lancia CANNON, oppure fa nache SCAN tanto e` gratis ma non lancia CANNON
-data ConnectionConfiguration
-       = ConnectionConfiguration {
-           gameServerAddress :: String
-         , robotName :: String
-         } deriving (Eq, Show, Ord)
 
 -- | X,Y pont.
 type Point = (Int, Int)
@@ -115,18 +107,3 @@ fromProtoBuffer bs
       Left err -> error $ "Error reading proto buffer message: " ++ err
       Right (r, _) -> r
 
-defaultRobotParams :: String -> CreateRobot
-defaultRobotParams robotName
-  = CreateRobot {
-      CreateRobot.name = uFromString robotName
-      , maxHitPoints = -1
-      , CreateRobot.maxSpeed = -1
-      , acceleration = -1
-      , decelleration = -1
-      , maxSterlingSpeed = -1
-      , maxScanDistance = -1
-      , maxFireDistance = -1
-      , bulletSpeed = -1
-      , bulletDamage = -1
-      , reloadingTime = -1
-      }

@@ -2,6 +2,7 @@
 module Main where
 
 import Game.Netrobots.Examples.TestRobotClassic
+import Game.Netrobots.Connection
 
 import System.Environment
 import System.Exit (exitFailure)
