@@ -3,9 +3,13 @@
 -- | A netwire FRP executable model for the Netrobots game.
 module Game.Netrobots.FRP.Model(
   HRobotWire
+  , hr_x
+  , hr_y
+  , hr_speed
   , executeDrive
   , executeScan
   , executeFire
+  , robotStatus  
   , IsWinner
   , runHRobot  
   ) where
@@ -43,19 +47,28 @@ import Prelude hiding ((.), id)
 
 -- TODO complete with easy accessible functions
 
+hr_x :: Status.RobotStatus -> Int
+hr_x s = fromIntegral $ Status.x s
+
+hr_y :: Status.RobotStatus -> Int
+hr_y s = fromIntegral $ Status.y s
+
+hr_speed :: Status.RobotStatus -> Int
+hr_speed s = fromIntegral $ Status.speed s
+
 --
 -- HRobot Wire Defs
 --
 
 type HRobotCommand
-       = MS.State (Maybe Drive.Drive, Maybe Scan.Scan, Maybe Cannon.Cannon)
+       = MS.State (Status.RobotStatus, Maybe Drive.Drive, Maybe Scan.Scan, Maybe Cannon.Cannon)
 
 -- | The wire of robots:
 --   * use Float as time
 --   * use () as error 
 --   * use Status.RobotStatus as input value
 --   * run inside HRobotCommand state monad, that stores the selected commands
-type HRobotWire b = Wire Float () HRobotCommand Status.RobotStatus b
+type HRobotWire a b = Wire Float () HRobotCommand a b
 
 type IsWinner = Bool
 
@@ -63,7 +76,7 @@ type IsWinner = Bool
 runHRobot
   :: ConnectionConfiguration
   -> CreateRobot.CreateRobot
-  -> HRobotWire b
+  -> HRobotWire a b
   -> IO IsWinner
 
 runHRobot connConf robotParams wire0 = runZMQ $ do
@@ -102,7 +115,7 @@ runHRobot connConf robotParams wire0 = runZMQ $ do
                       ((maybeErr, wire2), cmd)
                         = MS.runState
                             (stepWire wire1 deltaTime (Right robotState1))
-                            (Nothing, Nothing, Nothing)
+                            (robotState1, Nothing, Nothing, Nothing)
 
                       (driveCmd, scanCmd, fireCmd)
                         = case maybeErr of
@@ -150,22 +163,27 @@ runHRobot connConf robotParams wire0 = runZMQ $ do
 --
 
 -- | Change the state of the host Monad.
-executeDrive :: Maybe Drive.Drive -> HRobotWire ()
+executeDrive :: Maybe Drive.Drive -> HRobotWire a ()
 executeDrive v = mkGen_ $ \_ -> do
-  (_, sc, cn) <- MS.get
-  MS.put (v, sc, cn)
+  (s, _, sc, cn) <- MS.get
+  MS.put (s, v, sc, cn)
   return $ Right ()
   
 -- | Change the state of the host Monad.
-executeScan :: Maybe Scan.Scan -> HRobotWire ()
+executeScan :: Maybe Scan.Scan -> HRobotWire a ()
 executeScan v = mkGen_ $ \_ -> do
-  (dr, _, cn) <- MS.get
-  MS.put (dr, v, cn)
+  (s, dr, _, cn) <- MS.get
+  MS.put (s, dr, v, cn)
   return $ Right ()
 
 -- | Change the state of the host Monad.
-executeFire :: Maybe Cannon.Cannon -> HRobotWire ()
+executeFire :: Maybe Cannon.Cannon -> HRobotWire a ()
 executeFire v = mkGen_ $ \_ -> do
-  (dr, sc, _) <- MS.get
-  MS.put (dr, sc, v)
+  (s, dr, sc, _) <- MS.get
+  MS.put (s, dr, sc, v)
   return $ Right ()
+
+robotStatus :: HRobotWire a Status.RobotStatus
+robotStatus = mkGen_ $ \_ -> do
+  (s, _, _, _) <- MS.get
+  return $ Right s
