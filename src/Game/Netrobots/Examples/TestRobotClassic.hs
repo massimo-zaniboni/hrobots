@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 -- | A Robot with imperative-like code, for testing the ZMQ and Protobuffer part,
@@ -27,9 +28,39 @@ import Game.Netrobots.Proto.MainCommand
 import Game.Netrobots.Proto.RobotStatus as Status
 import Game.Netrobots.Proto.ScanStatus as ScanStatus
 
--- | X,Y pont.
+-- | X,Y point.
 type Point = (Int, Int)
 
+point_distance :: Point -> Point -> Double
+point_distance (x0, y0) (x1, y1)
+ = let d :: Int -> Int -> Double
+       d a b = (fromIntegral a - fromIntegral b) ** 2 
+   in  sqrt $ d x1 x0 + d y1 y0
+
+waitStatus :: Socket z Req -> Utf8 -> ZMQ z RobotStatus 
+waitStatus s tok
+    = let cmd = defaultValue { RobotCommand.token = tok }
+      in sendMainCmd s (defaultValue { robotCommand = Just cmd})
+
+sendMainCmd :: Socket z Req -> MainCommand -> ZMQ z RobotStatus
+sendMainCmd s cmd
+    = do liftIO $ putStrLn $ "Send command: " ++ show cmd
+         let protoCmd = LBS.toStrict $ messagePut cmd
+         send s [] protoCmd
+         bs <- receive s
+         let status :: RobotStatus = fromProtoBuffer $ LBS.fromStrict bs
+         liftIO $ putStrLn $ "Robot status: " ++ show status ++ "\n"
+         return status
+
+sendCmd :: Socket z Req -> Utf8 -> RobotCommand -> ZMQ z RobotStatus
+sendCmd s tok cmd
+    = do let mainCmd = MainCommand {
+                         createRobot = Nothing
+                         , robotCommand = Just $ cmd { RobotCommand.token = tok } 
+                         , deleteRobot = Nothing
+                         }
+         sendMainCmd s mainCmd
+ 
 robotClassic :: ConnectionConfiguration -> IO ()
 robotClassic connConf = runZMQ $ do
   s <- socket Req
@@ -39,7 +70,6 @@ robotClassic connConf = runZMQ $ do
            , robotCommand = Nothing
            , deleteRobot = Nothing
            }
-         
   st <- sendMainCmd s cmd
   let tok = Status.token st
 
@@ -47,34 +77,8 @@ robotClassic connConf = runZMQ $ do
 
   return ()
  where
-   
-  waitStatus s tok
-    = let cmd = defaultValue { RobotCommand.token = tok }
-      in sendMainCmd s (defaultValue { robotCommand = Just cmd})
 
-  sendMainCmd s cmd
-    = do liftIO $ putStrLn $ "Send command: " ++ show cmd
-         let protoCmd = LBS.toStrict $ messagePut cmd
-         send s [] protoCmd
-         bs <- receive s
-         let status :: RobotStatus = fromProtoBuffer $ LBS.fromStrict bs
-         liftIO $ putStrLn $ "Robot status: " ++ show status ++ "\n"
-         return status
-         
-  sendCmd s tok cmd
-    = do let mainCmd = MainCommand {
-                         createRobot = Nothing
-                         , robotCommand = Just $ cmd { RobotCommand.token = tok } 
-                         , deleteRobot = Nothing
-                         }
-         sendMainCmd s mainCmd
-   
-  distance :: Point -> Point -> Double
-  distance (x0, y0) (x1, y1)
-   = let d :: Int -> Int -> Double
-         d a b = (fromIntegral a - fromIntegral b) ** 2 
-     in  sqrt $ d x1 x0 + d y1 y0
-
+  
   gotoPosition s tok (x1, y1)
     = do s1 <- waitStatus s tok
          let (x0, y0) = (fromIntegral $ x s1, fromIntegral $ y s1)
@@ -90,7 +94,7 @@ robotClassic connConf = runZMQ $ do
   waitNearPosition s tok (x1, y1)
     = do s1 <- waitStatus s tok
          let (x0, y0) = (fromIntegral $ x s1, fromIntegral $ y s1)
-         let d1 = distance (x0, y0) (x1, y1)
+         let d1 = point_distance (x0, y0) (x1, y1)
          case d1 > 80.0 of
            True -> waitNearPosition s tok (x1, y1)
            False -> return ()
