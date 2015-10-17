@@ -2,17 +2,13 @@
 
 HRobots are robots, written in Haskell programming language, that can fight on a virtual arena, provided by NetRobots project at https://github.com/massimo-zaniboni/netrobots
 
-# Installation
+## Installation
 
-## Stack
+### Stack
 
 Under Debian install:
 
     sudo aptitude install libzmq3 libzmq3-dev pkg-config
-
-Under Fedora install:
-
-    sudo yum -i pkgconfig zeromq 
 
 Under other distributions:
 * install pkg-config tool
@@ -28,7 +24,7 @@ Test if the robot can start without error messages, with
 
 then press ctr-c because the robot will wait (forever) for the server connection.
 
-## Nix
+### Nix
 
     ./generate-nix-project.sh
     nix-shell -I . --command 'cabal build'
@@ -36,5 +32,9 @@ then press ctr-c because the robot will wait (forever) for the server connection
 ## Server 
 
 The Netrobots server is on repo https://github.com/massimo-zaniboni/netrobots
+
+## Tutorial
+
+See doc/ directory.
 
 

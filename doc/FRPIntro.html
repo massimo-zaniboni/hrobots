@@ -156,7 +156,8 @@ robotClassic connConf <span class="fu">=</span> runZMQ <span class="fu">$</span>
 <p>Quindi i programmi scritti in questo formalismo non sono facilmente estendibili e componibili, se si vuole rispettare il requisito che siano anche capaci di reagire agli eventi esterni.</p>
 <h3 id="possibile-soluzione">Possibile Soluzione</h3>
 <p>FRP e` una possibile soluzione dato che e` un formalismo dove ci sono eventi (stimoli sensoriali basici), eventi complessi risultato della combinazione di altri eventi (presa di coscienza di una certa situazione) ed e` possibile reagire di conseguenza, decidendo che piano di azioni seguire di volta in volta.</p>
-<p>La robottica e` un dominio complesso e quindi non voglio dire che FRP sia la soluzione definitiva al problema.</p>
+<p>In FRP si costruisce una serie di nodi che processano segnali e tornano altri segnali. E` come definire un circuito elettronico.</p>
+<p>NOTA: la robottica e` un dominio complesso e quindi non voglio dire che FRP sia la soluzione definitiva al problema. Si usa FRP per divertirsi e perche` e` comunque meglio di molti altri aprocci.</p>
 <h2 id="frp-intro">FRP Intro</h2>
 <p>Prima di applicare FRP all'esempio del Robot, e` utile fare degli esempi di codice FRP per impararne le basi. Anche perche` al momento non le conosco neanche io di preciso.</p>
 <p>Ci sono tantissime librerie FRP in Haskell. Ho scelto <code>netwire</code> dato che:</p>
@@ -207,6 +208,7 @@ myWire2 <span class="fu">=</span> <span class="dv">15</span> <span class="fu">+<
 <h3 id="events">Events</h3>
 <p>Un Wire e` associato ad un signal (beaviour) che varia nel tempo, e che ha un valore ad ogni momento specifico della simulazione.</p>
 <p>Un <code>Event</code> e` un valore che si ha in un solo momento della simulazione. Si pensi ai tasti premuti e altre cose di questo tipo.</p>
+<p><code>netwire</code> a differenza di altri FRP vede un event come un signal/behaviour &quot;normale&quot; che viene sopresso quando l'evento non e` presente, e riattivato quando l'evento e` presente. Quindi gli event sono sempre Wire.</p>
 <h3 id="switching">Switching</h3>
 <p>Eventi del sistema, generati dall'esterno o da condition calcolate internamente, possono essere usate come <code>Switch</code> per decidere che un <code>Wire</code> inizia a comportarsi in maniera completamente diversa. Siccome un <code>Wire</code> puo` anche essere un'intero grafo di Wire combinati insieme, lo Switch e` un modo per decidere che tipo di network FRP eseguire a run-time.</p>
 <p>Quindi se nel sistema accadono Eventi, il network cambia struttura in base alle istruzioni di Switch.</p>
@@ -232,6 +234,36 @@ myWire2 <span class="fu">=</span> <span class="dv">15</span> <span class="fu">+<
 <p>Tutte le altre funzioni che eseguono un Network fino a completition e simili, si basano su <code>stepWire</code>.</p>
 <h3 id="considerazioni">Considerazioni</h3>
 <p>Spero si aprezzi l'eleganza matematica del tutto e le infinite potenzialita` di combinare Wire e usarli in diverse Monad. In confronto il polimorfismo nei sistemi object-oriented sono un caso di gemelli siamesi :-) Il riuso di codice che si ha nella programmazione funzionale e` dato dalla possibilita` di usare building-block molto &quot;funzionali&quot; e adattabili. Ogni cosa che riusciamo a descrivere come un <code>Wire</code> puo` poi usare tutta la libreria <code>netwire</code>. Quindi o Robot o GUI o Spreadsheet, a patto che possano essere caricati in RAM e che quindi il motore <code>netwire</code> sia adatto per eseguirli.</p>
+<h3 id="e-i-task">E i Task?</h3>
+<p>Eravamo partiti da un Task di un Robot descritto in una IO Monad, e si era detto che non poteva essere interrotto da eventi esterni. E in FRP come e` possibile migliorare la situazione?</p>
+<p>Intanto e` possibile descrivere un Task in FRP usando questo (pseudo) codice</p>
+<p>TODO sostituire con codice reale quando ho tutto che gira</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell">  gotoPosition (x1, y1) <span class="fu">=</span> mkGen <span class="fu">$</span> \dt s1 <span class="kw">do</span>
+         <span class="kw">let</span> (x0, y0) <span class="fu">=</span> (fromIntegral <span class="fu">$</span> x s1, fromIntegral <span class="fu">$</span> y s1)
+         <span class="kw">let</span> (<span class="dt">Angle.Degrees</span> dg) <span class="fu">=</span> Angle.degrees <span class="fu">$</span> <span class="dt">Angle.Radians</span> <span class="fu">$</span> atan2 (fromIntegral <span class="fu">$</span> y1 <span class="fu">-</span> y0) (fromIntegral <span class="fu">$</span> x1 <span class="fu">-</span> x0)
+         <span class="kw">let</span> heading <span class="fu">=</span> fromInteger <span class="fu">$</span> toInteger <span class="fu">$</span> round dg 
+         <span class="kw">let</span> driveCmd <span class="fu">=</span> <span class="dt">Drive</span> { Drive.speed <span class="fu">=</span> <span class="dv">100</span>, Drive.direction <span class="fu">=</span> heading }
+         drive (defaultValue { RobotCommand.drive <span class="fu">=</span> <span class="dt">Just</span> driveCmd })
+           <span class="fu">--&gt;</span> waitNearPosition (x1, y1)
+           <span class="fu">--&gt;</span> drive (defaultValue { RobotCommand.drive <span class="fu">=</span> <span class="dt">Just</span> <span class="fu">$</span> <span class="dt">Drive</span> { Drive.speed <span class="fu">=</span> <span class="dv">0</span>, Drive.direction <span class="fu">=</span> heading }})
+           <span class="fu">--&gt;</span> waitStopMovement
+           <span class="fu">--&gt;</span> return ()</code></pre></div>
+<p>Questo codice crea un Wire che accetta lo stato del robot e il delta-time e inizia ad eseguire una catena di altri task combinanod altri Wire:</p>
+<ul>
+<li>esegue il comando di movimento verso la direzione richiesta</li>
+<li>poi passa subito ad aspettare di arrivare vicino alla posizione, applicando la funzione di switch di un Task <code>--&gt;</code></li>
+<li>quando arriva vicino alla posizione esegue il comando di frenata</li>
+<li>aspetta di essersi fermato</li>
+<li>torna il risultato finale che e` un <code>()</code> in questo caso</li>
+</ul>
+<p>Ok il codice assomiglia al codice nella IO e permette di combinare piu` task, ma come fa il sistema ad essere reattivo?</p>
+<p><code>gotoPosition</code> e` una funzione che torna un Wire. Quindi ci puo` essere un</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell">robotMainLoop <span class="fu">=</span> mkGen <span class="fu">$</span> \dt s <span class="kw">do</span>
+  escapeIfUnderAttack <span class="fu">&lt;|&gt;</span> fireIfFoundEnemy <span class="fu">&lt;|&gt;</span> gotoPosition (<span class="dv">100</span>, <span class="dv">100</span>)</code></pre></div>
+<p>che combina differenti Wire e in particolare favorisce la fuga, poi l'attacco e infine il task di movimento alla posizione voluta. Per la semantica di FRP in ogni momento dell'esecuzione del task <code>gotoPosition</code>, anche i task <code>escapeIfUnderAttack</code> e <code>fireIfFoundEnemy</code> sono aggiornati e nel caso si attivino, il Wire <code>mainLoop</code> passa a eseguire loro. Quindi ogni istruzione di <code>gotoPosition</code> viene eseguita solo se non ci sono altri Wire con maggior precedenza.</p>
+<p>Da notare che nel caso <code>gotoPosition</code> venga eseguita di nuovo, non ci sono problemi a eseguire le sue istruzioni dall'inizio, dato che si tratta di puntare nuovamente nella direzione giusta, accelerare e frenare. Anzi e` indispenabile ripartire dall'inizio dato che magari nella fuga si aveva cambiato completamente posizione rispetto al target.</p>
+<p>Quindi FRP permette sia di scrivere Task complessi come se fossero una sequenza di altri Task, e sia di interrompere il Task corrente se arrivano nuovi eventi che attivano Task con maggior priorita`.</p>
+<p>FRP e` a tutti gli effetti un DSL con una sua semantica, come puo` essere Prolog, o SQL o un linguaggio imperativo e la sua semantica e` adatta per descrivere controllers di Robot, ma non solo.</p>
 <h3 id="altro">Altro</h3>
 <p>Un tutorial su <code>netwire</code> si trova su http://hackage.haskell.org/package/netwire</p>
 <p>Dopo di che c'e` l'API di <code>netwire</code> e per finire ogni volta che si definisce una instance di Wire e` possibile usare tutte le funzioni definite per l'instance per i Wire.</p>
@@ -240,4 +272,4 @@ myWire2 <span class="fu">=</span> <span class="dv">15</span> <span class="fu">+<
 <p>In realta` e` tardi e non ho tempo di verificare se il codice compila...</p>
 <h2 id="next-passages">Next Passages</h2>
 <p>Ora devo definire delle Wire che accettano i valori tornati dai sensori di un robot, che tornano come risultato finale un comando da inviare ad un robot, e creo un framework che invia comandi e immette nelle Wire lo stato del Robot.</p>
-<p>Fatto questo e` possibile usare <code>netwire</code> per specificare dei Robot.</p>
+<p>Fatto questo e` possibile usare <code>netwire</code> per specificare dei Robot e quindi faro` vedere dei Robot di esempio, da usare come basi per Robot via via piu` complessi.</p>

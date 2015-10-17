@@ -284,6 +284,8 @@ Un Wire e\` associato ad un signal (beaviour) che varia nel tempo, e che ha un v
 
 Un `Event` e\` un valore che si ha in un solo momento della simulazione. Si pensi ai tasti premuti e altre cose di questo tipo.
 
+`netwire` a differenza di altri FRP vede un event come un signal/behaviour "normale" che viene sopresso quando l'evento non e\` presente, e riattivato quando l'evento e\` presente. Quindi gli event sono sempre Wire. 
+
 ### Switching
 
 Eventi del sistema, generati dall'esterno o da condition calcolate internamente, possono essere usate come `Switch` per decidere che un `Wire` inizia a comportarsi in maniera completamente diversa. Siccome un `Wire` puo\` anche essere un'intero grafo di Wire combinati insieme, lo Switch e\` un modo per decidere che tipo di network FRP eseguire a run-time.
@@ -318,6 +320,48 @@ Tutte le altre funzioni che eseguono un Network fino a completition e simili, si
 
 Spero si aprezzi l'eleganza matematica del tutto e le infinite potenzialita\` di combinare Wire e usarli in diverse Monad. In confronto il polimorfismo nei sistemi object-oriented sono un caso di gemelli siamesi :-) Il riuso di codice che si ha nella programmazione funzionale e\` dato dalla possibilita\` di usare building-block molto "funzionali" e adattabili. Ogni cosa che riusciamo a descrivere come un `Wire` puo\` poi usare tutta la libreria `netwire`. Quindi o Robot o GUI o Spreadsheet, a patto che possano essere caricati in RAM e che quindi il motore `netwire` sia adatto per eseguirli.
 
+### E i Task?
+
+Eravamo partiti da un Task di un Robot descritto in una IO Monad, e si era detto che non poteva essere interrotto da eventi esterni. E in FRP come e\` possibile migliorare la situazione?
+
+Intanto e\` possibile descrivere un Task in FRP usando questo (pseudo) codice
+
+TODO sostituire con codice reale quando ho tutto che gira
+
+>   gotoPosition (x1, y1) = mkGen $ \dt s1 do
+>          let (x0, y0) = (fromIntegral $ x s1, fromIntegral $ y s1)
+>          let (Angle.Degrees dg) = Angle.degrees $ Angle.Radians $ atan2 (fromIntegral $ y1 - y0) (fromIntegral $ x1 - x0)
+>          let heading = fromInteger $ toInteger $ round dg 
+>          let driveCmd = Drive { Drive.speed = 100, Drive.direction = heading }
+>          drive (defaultValue { RobotCommand.drive = Just driveCmd })
+>            --> waitNearPosition (x1, y1)
+>            --> drive (defaultValue { RobotCommand.drive = Just $ Drive { Drive.speed = 0, Drive.direction = heading }})
+>            --> waitStopMovement
+>            --> return ()
+
+Questo codice crea un Wire che accetta lo stato del robot e il delta-time e inizia ad eseguire una catena di altri task combinanod altri Wire:
+
+* esegue il comando di movimento verso la direzione richiesta
+* poi passa subito ad aspettare di arrivare vicino alla posizione, applicando la funzione di switch di un Task `-->`
+* quando arriva vicino alla posizione esegue il comando di frenata
+* aspetta di essersi fermato
+* torna il risultato finale che e\` un `()` in questo caso
+
+Ok il codice assomiglia al codice nella IO e permette di combinare piu\` task, ma come fa il sistema ad essere reattivo?
+
+`gotoPosition` e\` una funzione che torna un Wire. Quindi ci puo\` essere un
+
+> robotMainLoop = mkGen $ \dt s do
+>   escapeIfUnderAttack <|> fireIfFoundEnemy <|> gotoPosition (100, 100)
+
+che combina differenti Wire e in particolare favorisce la fuga, poi l'attacco e infine il task di movimento alla posizione voluta. Per la semantica di FRP in ogni momento dell'esecuzione del task `gotoPosition`, anche i task `escapeIfUnderAttack` e `fireIfFoundEnemy` sono aggiornati e nel caso si attivino, il Wire `mainLoop` passa a eseguire loro. Quindi ogni istruzione di `gotoPosition` viene eseguita solo se non ci sono altri Wire con maggior precedenza.
+
+Da notare che nel caso `gotoPosition` venga eseguita di nuovo, non ci sono problemi a eseguire le sue istruzioni dall'inizio, dato che si tratta di puntare nuovamente nella direzione giusta, accelerare e frenare. Anzi e\` indispenabile ripartire dall'inizio dato che magari nella fuga si aveva cambiato completamente posizione rispetto al target.
+
+Quindi FRP permette sia di scrivere Task complessi come se fossero una sequenza di altri Task, e sia di interrompere il Task corrente se arrivano nuovi eventi che attivano Task con maggior priorita\`.
+
+FRP e\` a tutti gli effetti un DSL con una sua semantica, come puo\` essere Prolog, o SQL o un linguaggio imperativo e la sua semantica e\` adatta per descrivere controllers di Robot, ma non solo.
+
 ### Altro
 
 Un tutorial su `netwire` si trova su http://hackage.haskell.org/package/netwire
@@ -335,6 +379,4 @@ In realta\` e\` tardi e non ho tempo di verificare se il codice compila...
 Ora devo definire delle Wire che accettano i valori tornati dai sensori di un robot, che tornano come risultato finale un comando da inviare ad un robot, e creo un framework che invia comandi e immette nelle Wire lo stato del Robot.
 
 Fatto questo e\` possibile usare `netwire` per specificare dei Robot e quindi faro\` vedere dei Robot di esempio, da usare come basi per Robot via via piu\` complessi.
-
-
 
