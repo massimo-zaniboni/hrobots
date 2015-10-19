@@ -1,11 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
--- | A Robot with imperative-like code, for testing the ZMQ and Protobuffer part,
---   before encapsulating the control logic in more advanced libraries.
-module Game.Netrobots.Examples.TestRobotClassic(
-  robotClassic
-  ) where
+-- | A Robot with imperative-like code.
+module Game.Netrobots.Classic.Robot where
 
 import System.ZMQ4.Monadic
 import Control.Monad (forever)
@@ -17,7 +14,7 @@ import Text.ProtocolBuffers.Reflections
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Angle as Angle
 
-import Game.Netrobots.Connection
+import Game.Netrobots.Game
 import Game.Netrobots.Proto.CreateRobot as CreateRobot
 import Game.Netrobots.Proto.RobotCommand as RobotCommand
 import Game.Netrobots.Proto.DeleteRobot
@@ -28,26 +25,12 @@ import Game.Netrobots.Proto.MainCommand
 import Game.Netrobots.Proto.RobotStatus as Status
 import Game.Netrobots.Proto.ScanStatus as ScanStatus
 
--- | X,Y point.
-type Point = (Int, Int)
+-- --------------------------------------------
+-- Basic Commands API
 
-point_distance :: Point -> Point -> Double
-point_distance (x0, y0) (x1, y1)
- = let d :: Int -> Int -> Double
-       d a b = (fromIntegral a - fromIntegral b) ** 2 
-   in  sqrt $ d x1 x0 + d y1 y0
-
--- | Direction 0 - 360. 90 is NORTH, 0 is EAST, 270 is SOUTH, 189 is WEST. 
-type Direction = Int
-
--- | Distance from 0 to 1000
-type Distance = Int
-
-{- XXX
--- | Create a Robot with default params.
-initRobot :: ConnectionConfiguration -> ZMQ z (RobotSocket w, RobotToken)
-initRobot connConf = runZMQ $ do
-  s <- socket Req
+-- | Connect to the server. 
+initRobot :: ConnectionConfiguration -> RobotSocket z -> ZMQ z RobotToken
+initRobot connConf s = do
   connect s (gameServerAddress connConf)
   let cmd = MainCommand {
              createRobot = Just $ defaultRobotParams $ robotName connConf
@@ -56,30 +39,20 @@ initRobot connConf = runZMQ $ do
            }
   st <- sendMainCmd s cmd
   let tok = Status.token st
-  return (s, tok)
--}
+  return tok
 
 createCmd_fire :: Direction -> Distance -> Cannon
 createCmd_fire dir dst
   = Cannon { Cannon.direction = fromIntegral $ dir, Cannon.distance = fromIntegral $ dst }
 
-type Speed = Int
 
 createCmd_drive :: Direction -> Speed -> Drive
 createCmd_drive dir sp
   = Drive { Drive.direction = fromIntegral dir, Drive.speed = fromIntegral sp }
 
--- | From 0 to 180
-type SemiAperture = Int
-
 createCmd_scan :: Direction -> SemiAperture -> Scan
 createCmd_scan dir ap
   = Scan { Scan.direction = fromIntegral dir, Scan.semiaperture = fromIntegral ap }
-
--- | Robot token identifying it in the system.
-type RobotToken = Utf8
-
-type RobotSocket z = Socket z Req
 
 -- | Send a command to the server and wait for the answer with the new robot status.
 --   A robot can move, scan and fire (if it is not reloading) at each move.
@@ -113,9 +86,8 @@ sendMainCmd s cmd
          liftIO $ putStrLn $ "Robot status: " ++ show status ++ "\n"
          return status
 
---
--- Tasks
---
+-- ---------------------------------------------------------------
+-- Complex Tasks
 
 task_gotoPosition :: RobotSocket z -> RobotToken -> Point -> ZMQ z ()
 task_gotoPosition s tok (x1, y1)
@@ -137,34 +109,32 @@ task_waitNearPosition s tok (x1, y1)
          case d1 > 80.0 of
            True -> task_waitNearPosition s tok (x1, y1)
            False -> return ()
-           
+
 task_waitStopMovement s tok 
    = do s1 <- waitStatus s tok 
         case (Status.speed s1) > 0 of
           True -> task_waitStopMovement s tok
           False -> return ()
- 
 
+--- --------------------------------------------
+-- Example Robots
 
 -- | An example of Robot.
 robotClassic :: ConnectionConfiguration -> IO ()
 robotClassic connConf = runZMQ $ do
   s <- socket Req
-  connect s (gameServerAddress connConf)
-  let cmd = MainCommand {
-             createRobot = Just $ defaultRobotParams $ robotName connConf
-           , robotCommand = Nothing
-           , deleteRobot = Nothing
-           }
-  st <- sendMainCmd s cmd
-  let tok = Status.token st
-
+  tok <- initRobot connConf s
   task_gotoPosition s tok (100,200) 
   return ()
-         
+
+-- -------------------------------------------------------------
+-- Low Level Functions
+
 fromProtoBuffer :: (ReflectDescriptor msg, Wire msg) => ByteString -> msg
 fromProtoBuffer bs
   = case messageGet bs of
       Left err -> error $ "Error reading proto buffer message: " ++ err
       Right (r, _) -> r
+
+
 

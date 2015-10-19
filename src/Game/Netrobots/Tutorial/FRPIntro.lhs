@@ -24,7 +24,7 @@ Per aprezzare perche\` ci serve FRP partiamo da un esempio di un robot che non n
 
 Iniziamo con del codice che si puo\` tranquillamente ignorare (e\` un literate document quindi lo devo comunque inserire se no non compila)
 
-> module Game.Netrobots.Examples.FRPIntro where
+> module Game.Netrobots.Tutorial.FRPIntro where
 
 > import System.ZMQ4.Monadic
 > import Control.Monad (forever)

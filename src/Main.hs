@@ -1,8 +1,10 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+
 module Main where
 
-import Game.Netrobots.Examples.TestRobotClassic
-import Game.Netrobots.Connection
+import Game.Netrobots.FRP.Robot as FRP
+import Game.Netrobots.Classic.Robot
+import Game.Netrobots.Game
 
 import System.Environment
 import System.Exit (exitFailure)
@@ -16,6 +18,10 @@ runRobot serverAddr zmqPort robotCode robotName' = do
   case robotCode of
     "classic"
       -> robotClassic conn
+    "frp-demo1"
+      -> runHRobotWithDefaultParams conn robotName' FRP.demo1 
+    "frp-demo2"
+      -> runHRobotWithDefaultParams conn robotName' FRP.demo2 
     _ -> error $ "Unknown robot code " ++ robotCode     
 
   return ()
